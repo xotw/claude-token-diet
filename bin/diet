@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# diet — Claude Token Diet CLI
+# Entry point. Dispatches to lib/*.sh
+
+set -e
+
+DIET_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/.." && pwd)"
+export DIET_ROOT
+
+cmd="${1:-stats}"
+shift || true
+
+case "$cmd" in
+  stats)     exec bash "$DIET_ROOT/lib/stats.sh" "$@" ;;
+  audit)     exec bash "$DIET_ROOT/lib/audit.sh" "$@" ;;
+  install)   exec bash "$DIET_ROOT/install.sh" "$@" ;;
+  undo|uninstall) exec bash "$DIET_ROOT/lib/undo.sh" "$@" ;;
+  help|-h|--help) exec bash "$DIET_ROOT/lib/help.sh" "$@" ;;
+  version|-v|--version)
+    echo "diet 0.1.0 (claude-token-diet)"
+    ;;
+  *)
+    echo "diet: unknown command '$cmd'" >&2
+    echo "try: diet help" >&2
+    exit 1
+    ;;
+esac
