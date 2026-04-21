@@ -140,6 +140,20 @@ else
   fi
 fi
 
+# ── Step 5: install marker (so `diet stats` can show "Since install" row) ───
+step "Record install timestamp"
+MARKER_DIR="$HOME/.config/diet"
+MARKER="$MARKER_DIR/install_epoch"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  skip "would write install epoch to $MARKER"
+elif [[ -f "$MARKER" ]]; then
+  ok "marker already exists (kept original install date)"
+else
+  mkdir -p "$MARKER_DIR"
+  date +%s > "$MARKER"
+  ok "wrote $MARKER"
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "  ${C_GREEN}${C_BOLD}✓ Install complete.${C_RESET}"

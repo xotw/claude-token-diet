@@ -119,37 +119,67 @@ else
 fi
 
 # ── Section 2: rolling-window table from transcripts ─────────────────────────
-python3 - <<PY
+export DIET_PROJECTS_DIR="$CLAUDE_PROJECTS_DIR"
+export DIET_PRICE_IN="$PRICE_INPUT"
+export DIET_PRICE_OUT="$PRICE_OUTPUT"
+export DIET_PRICE_CACHE_R="$PRICE_CACHE_READ"
+export DIET_PRICE_CACHE_W="$PRICE_CACHE_WRITE"
+export DIET_WINDOW_FILTER="$WINDOW"
+
+python3 - <<'PY'
 import json, os, glob, time
 from datetime import datetime
 
-PROJECTS = "${CLAUDE_PROJECTS_DIR}"
-PRICE_IN = float("${PRICE_INPUT}")
-PRICE_OUT = float("${PRICE_OUTPUT}")
-PRICE_CACHE_R = float("${PRICE_CACHE_READ}")
-PRICE_CACHE_W = float("${PRICE_CACHE_WRITE}")
-WINDOW_FILTER = "${WINDOW}"
+PROJECTS = os.environ["DIET_PROJECTS_DIR"]
+PRICE_IN = float(os.environ["DIET_PRICE_IN"])
+PRICE_OUT = float(os.environ["DIET_PRICE_OUT"])
+PRICE_CACHE_R = float(os.environ["DIET_PRICE_CACHE_R"])
+PRICE_CACHE_W = float(os.environ["DIET_PRICE_CACHE_W"])
+WINDOW_FILTER = os.environ.get("DIET_WINDOW_FILTER", "")
 
 tty = os.isatty(1) and not os.environ.get("NO_COLOR")
 def C(code, s): return f"\033[{code}m{s}\033[0m" if tty else s
 B = lambda s: C("1", s); DIM = lambda s: C("2", s)
 GREEN = lambda s: C("32", s); YEL = lambda s: C("33", s); RED = lambda s: C("31", s)
 
+# Read install marker (set by `diet install`, seeded on first stats run)
+INSTALL_MARKER = os.path.expanduser("~/.config/diet/install_epoch")
+install_epoch = None
+try:
+    with open(INSTALL_MARKER) as f:
+        install_epoch = int(f.read().strip())
+except Exception:
+    # First run without marker: seed it with "now" so future runs are accurate
+    try:
+        os.makedirs(os.path.dirname(INSTALL_MARKER), exist_ok=True)
+        install_epoch = int(time.time())
+        with open(INSTALL_MARKER, "w") as f:
+            f.write(str(install_epoch))
+    except Exception:
+        install_epoch = None
+
+now = time.time()
+install_age = (now - install_epoch) if install_epoch else None
+
 ALL_WINDOWS = [
     ("24h", "Last 24 hours", 86400),
     ("48h", "Last 48 hours", 2*86400),
     ("7d",  "Last 7 days",   7*86400),
     ("30d", "Last 30 days",  30*86400),
+    ("install", "Since diet install", install_age),
     ("all", "All time",      None),
 ]
 
 if WINDOW_FILTER:
     windows = [w for w in ALL_WINDOWS if w[0] == WINDOW_FILTER]
 else:
-    # default: skip "all time" in the stacked view (keeps table tight)
-    windows = [w for w in ALL_WINDOWS if w[0] != "all"]
+    # default: skip "all time" (keeps table tight). Always show "install"
+    # when we have a marker, even if fresh — the user wants to see their
+    # cumulative impact since installing diet.
+    windows = [w for w in ALL_WINDOWS if w[0] not in ("all",)]
+    if install_epoch is None:
+        windows = [w for w in windows if w[0] != "install"]
 
-now = time.time()
 max_window_sec = max((w[2] for w in windows if w[2] is not None), default=None)
 cutoff_oldest = 0 if max_window_sec is None else now - max_window_sec
 
@@ -213,14 +243,14 @@ def hit_color(h):
     if h > 40: return YEL(f"{h:>3.0f}%")
     return RED(f"{h:>3.0f}%")
 
-def fmt_money(x): return f"\${x:,.2f}"
+def fmt_money(x): return f"${x:,.2f}"
 
 # Print table
 print()
-print(f"  {B('Usage by rolling window')}  {DIM('(from Claude Code transcripts)')}")
+print(f"  {B('Claude Code usage')}  {DIM('(from your transcripts in ~/.claude/projects)')}")
 print()
-headers = ["Period", "Sessions", "Turns", "Spend", "Cache", "Saved by cache"]
-widths  = [15, 9, 8, 10, 6, 15]
+headers = ["Period", "Sessions", "Turns", "Spend", "Cache", "Anthropic cache $"]
+widths  = [20, 9, 8, 10, 6, 17]
 line = "    " + "  ".join(h.ljust(w) for h,w in zip(headers, widths))
 print(B(line))
 print("    " + "  ".join("─"*w for w in widths))
@@ -242,13 +272,21 @@ for wkey, wlabel, _ in windows:
     print("    " + "  ".join(row))
 print()
 
-# Quick-read line for the first (most recent) window present
-w0_key, w0_label, _ = windows[0]
-_, t0, sp0, hit0, sv0 = row_metrics(stats[w0_key])
-if t0:
-    print(f"    {DIM('Read:')} {w0_label.lower()}  {t0:,} turns  •  {fmt_money(sp0)} spend  •  {fmt_money(sv0)} saved by cache")
-else:
-    print(f"    {DIM('No Claude Code activity in this window yet.')}")
+# Honest footer: what's diet-attributable vs what's Anthropic doing for you anyway
+print()
+print(f"    {DIM('What these columns mean:')}")
+print(f"    {DIM('•')} {DIM('Spend = what Claude Code cost (or would cost at public rates)')}")
+print(f"    {DIM('•')} {DIM('Cache = % of input served from Anthropic prompt cache (cheaper reads)')}")
+print(f"    {DIM('•')} {DIM('Anthropic cache $ = what prompt caching already saved you vs no-cache baseline.')}")
+print(f"    {DIM('  This is Anthropic doing the discount, not diet. diet just helps you')}")
+msg = "  keep cache hit rate high (avoid >5min pauses, no CLAUDE.md edits mid-session)."
+print(f"    {DIM(msg)}")
+if install_epoch:
+    d = datetime.fromtimestamp(install_epoch).strftime("%Y-%m-%d %H:%M")
+    print()
+    print(f"    {DIM(f'diet installed: {d}')}")
+    print(f"    {DIM('• rtk compression (top line) is the direct, measured diet impact.')}")
+    print(f"    {DIM('• Behavioral rules (Token Discipline) show up as fewer turns over time.')}")
 print()
 PY
 
