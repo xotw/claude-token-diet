@@ -1,206 +1,123 @@
 # Claude Token Diet
 
-**Cut your Claude Code token usage by 60–90%. One install. Works everywhere. Reversible any time.**
+**Cut your Claude Code token usage by 60 to 90%. One command to install. Works on Mac and Linux. Reversible any time.**
 
 ---
 
-Claude Code is powerful, but it reads a lot. Every `git status`, every file
-read, every grep — all that output lands in your context window. On a long
-session you can easily burn 500k+ tokens on raw command output that nobody
-reads twice.
+## The problem
 
-`diet` wraps three proven techniques into a single setup:
+If you use Claude Code, it reads a *lot* in the background. Every `git status`, every file open, every search — all that output lands in Claude's memory. You're paying for Claude to read noise.
 
-1. **Output compression** — via [`rtk`](https://github.com/rtk-ai/rtk), a shell
-   proxy that compresses command output before Claude sees it.
-2. **Behavioral rules** — a drop-in `CLAUDE.md` block that tells Claude to stop
-   re-reading files, narrating every step, or spawning agents for trivial work.
-3. **Context audit** — a command to tell you *where your tokens are going*
-   right now, and what to prune next.
+On a long session, you can easily burn through hundreds of thousands of tokens just on raw command output nobody actually needs.
 
-Plus a single command — `diet stats` — that shows what you saved.
+## The fix
 
----
+`diet` is a small tool that puts Claude on a diet. Same experience, way less waste.
 
-## Install
+It does three things:
 
-**One line:**
+1. **Compresses command output** before Claude sees it (80-90% smaller on average)
+2. **Teaches Claude to read smarter** — no re-reading files, no useless searches, no writing random planning documents
+3. **Audits your setup** — tells you which Claude extensions (MCP servers) you're paying for but never actually using
+
+## Install (2 minutes)
+
+Copy-paste this into your terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xotw/claude-token-diet/main/install.sh | bash
 ```
 
-Or, if you cloned the repo:
+Then **restart Claude Code**. That's it.
+
+If you'd rather clone the repo:
 
 ```bash
 git clone https://github.com/xotw/claude-token-diet.git ~/.claude-token-diet
 ~/.claude-token-diet/install.sh
 ```
 
-That's it. Restart Claude Code when it tells you to.
+**You need:** macOS or Linux, Python 3 (pre-installed on Mac), and either Homebrew or `curl`.
 
-**Requirements:** macOS or Linux, `python3` (pre-installed on Mac), and either
-`brew` or `curl` (for installing rtk). No Rust toolchain needed.
+## See what you saved
 
----
-
-## Usage
+After a day of normal work:
 
 ```bash
-diet stats          # Show your savings (today by default)
-diet stats --week   # Last 7 days
-diet stats --all    # Since install
-diet stats --explain   # How the numbers are computed
-
-diet audit          # Find what's still eating your context
-diet audit mcp      #   → MCP servers: which are idle, which earn their keep
-diet audit md       #   → CLAUDE.md size + trim suggestions
-diet audit files    #   → Heaviest file reads this week
-
-diet undo           # Roll back every change cleanly
-diet help
+diet stats
 ```
 
-### Example: `diet stats`
+You get something like this:
 
 ```
   Claude Token Diet — your savings
 
-  rtk (Bash-tool compression)
-    Commands run:   347
-    Raw bytes:      682,104
-    Compressed:     143,220
-    Saved:          538,884 bytes (79%)
+  rtk (Bash-tool compression)  cumulative since install
+    115 commands  •  4,037,054 bytes raw  →  5,982 bytes after  (100% smaller)
 
-  Today — Claude Code usage
-    Sessions:         8
-    Assistant turns:  412
-    Input tokens:     2,104,330
-    Output tokens:    58,420
-    Cache hit rate:   88%   healthy
-    Estimated spend:  $3.42
-    Saved by cache:   $28.10   (vs. no prompt caching)
+  Claude Code usage  (from your transcripts in ~/.claude/projects)
 
-  Where your tokens go
-    ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇   82.1%  Cache (stable context)
-    ▇▇                              5.3%  New input (this turn)
-    ▇▇                              6.2%  Cache writes (updates)
-    ▇▇                              6.4%  Output (Claude's reply)
+    Period                Sessions  Turns    Spend       Cache  Anthropic cache $
+    ────────────────────  ────────  ───────  ──────────  ─────  ─────────────────
+    Last 24 hours                9    1,345      $80.84    95%            $332.31
+    Last 48 hours               15    1,841     $111.41    94%            $400.51
+    Last 7 days                978   11,454     $627.88    88%          $1,651.92
+    Last 30 days             6,171   44,729   $2,477.57    92%          $8,975.69
+    Since diet install           7      977      $62.39    95%            $232.47
 
-  Opportunities still on the table
-    • You have 8 global MCP servers loaded — each adds tool schemas
-      to every turn. Run: diet audit mcp
+    diet installed: 2026-04-20 13:50
 ```
 
----
+Reading the table:
 
-## What's actually happening?
+- **The top line** is what diet directly saved you: 4 MB of shell output that Claude never had to read.
+- **The table** is your normal Claude Code usage, broken into rolling time windows.
+- **Since diet install** grows every session, so you can watch diet's impact in real time.
 
-### Layer 1 — Tool output bloat (the part rtk handles)
+## Commands
 
-Shell commands are noisy. `ls` dumps every file. `git status` lists everything.
-`cat` returns entire files. When Claude uses the Bash tool, all that output
-gets pasted into the model's context, whether Claude actually needs it or not.
-
-`rtk` sits between Claude and your shell. `git status` → `rtk git status`
-transparently, and Claude sees a compressed version. **60-90% smaller** for
-most dev commands.
-
-### Layer 2 — Behavioral waste (the part CLAUDE.md handles)
-
-Claude Code has three file-reading tools — `Read`, `Grep`, `Glob` — that
-bypass the shell entirely. rtk can't help there. Instead, we give Claude a
-set of rules in `CLAUDE.md`:
-
-- Don't re-read a file you just edited
-- Don't read a file without knowing what you're looking for
-- Don't spawn a subagent when a single Grep would do
-- Don't write summaries between every tool call
-
-These are small rules, but they compound across a long session.
-
-### Layer 3 — Always-loaded context (the silent whale)
-
-Every Claude Code session loads your `CLAUDE.md` *and* the schema for every
-MCP server you have configured. One MCP is fine. Ten MCPs is 30-80k tokens of
-tool schemas loaded before you type anything. `diet audit mcp` shows which of
-your MCPs haven't been called in 30 days so you can disable the dead weight.
-
-### Layer 4 — Cache hit rate (the free multiplier)
-
-Anthropic's prompt cache is 10× cheaper to read than fresh input. Cache TTL
-is 5 minutes. If you're pausing between Claude Code messages for 6+ minutes,
-you're blowing the cache every time. `diet stats` shows your cache hit rate
-so you can see if your session rhythm is costing you.
-
----
-
-## How `diet stats` computes savings
-
-Run `diet stats --explain` for the full breakdown. Short version:
-
-- **rtk savings**: exact. Measured by rtk itself, compressed-vs-raw bytes.
-- **Session tokens**: exact. Parsed from Claude Code's own transcripts in
-  `~/.claude/projects/*.jsonl`.
-- **Cost**: exact × current Anthropic pricing (override via `DIET_PRICE_*`
-  env vars if you're on a different tier).
-- **Cache savings**: counterfactual — what you'd pay if every `cache_read`
-  were a fresh `input`. Clearly a ballpark, but directionally honest.
-
-We don't fake precision. If a number is estimated, the tool says so.
-
----
-
-## Uninstall
-
-```bash
-diet undo
+```
+diet stats        # see your savings
+diet audit        # find what's still wasting tokens
+  ├─ diet audit mcp    which Claude extensions are sitting idle
+  ├─ diet audit md     how big is your CLAUDE.md
+  └─ diet audit files  which files you're reading most
+diet undo         # roll everything back, cleanly
+diet help
 ```
 
-Removes the hook from `settings.json`, removes the `CLAUDE.md` block, removes
-the symlink. Leaves rtk installed (run `brew uninstall rtk` yourself if you
-want it gone). All changes are backed up with timestamps.
+## Safety
 
----
+- Every change gets a timestamped backup before anything is touched
+- `diet undo` reverses the install in seconds (removes the hook, removes the CLAUDE.md block, removes the symlink)
+- Nothing leaves your machine — everything runs locally
+- Works alongside your existing Claude Code setup, doesn't replace it
 
 ## FAQ
 
-**Does this send my data anywhere?**
-No. Everything runs locally. `diet` reads files on your machine and prints to
-your terminal. rtk is the same. Nothing phones home.
+**Is this official Anthropic tooling?**
+No. This is an open-source layer on top of Claude Code + [rtk](https://github.com/rtk-ai/rtk). It uses Claude Code's public hook system — nothing hacky.
 
-**Will this break my existing CLAUDE.md or settings?**
-No. `diet install` appends to `CLAUDE.md` with clearly marked start/end
-comments. It uses rtk's own `--auto-patch` to merge into `settings.json`.
-Both files get timestamped backups before any change. `diet undo` is clean.
+**Does it work with Cursor / Windsurf / Cline?**
+The underlying tool (rtk) supports them. `diet install` currently wires Claude Code. For other agents, run `rtk init --agent cursor` (or `windsurf`, `cline`, `codex`, etc.) manually after `diet install`.
 
-**I use Cursor / Windsurf / Cline / something else, not Claude Code.**
-rtk supports all of those. `diet install` currently wires Claude Code by
-default. For other agents, run `rtk init --agent cursor` (or windsurf, cline,
-etc.) manually after `diet install` — see the rtk docs.
+**What if my cache hit rate is low?**
+Usually means you're pausing more than 5 minutes between Claude Code messages (Anthropic's prompt cache expires after 5 min), or editing your `CLAUDE.md` mid-session (cache invalidation). Keep sessions moving.
 
-**My cache hit rate is low. Why?**
-Usually one of:
-- You let the session idle >5 minutes between messages (cache TTL)
-- You edited `CLAUDE.md` mid-session (cache invalidation)
-- You added/removed MCP servers mid-session (cache invalidation)
+**How accurate are the numbers?**
+- **rtk compression line**: exact, measured by rtk.
+- **Token counts**: exact, pulled from Claude Code's own transcript files.
+- **Spend**: tokens × current Anthropic public pricing (override with `DIET_PRICE_*` env vars if you're on a different tier).
+- **Anthropic cache $**: counterfactual — what you'd pay if every cached read had been a fresh input. Directionally honest, not exact-to-the-cent.
 
-Keep sessions moving or use `/clear` at natural breaks.
+**Why does the table show 30 days of data if I only installed diet yesterday?**
+Because Claude Code has been writing your usage to disk the whole time. diet just reads those transcripts. The **Since diet install** row is the only one scoped to after you installed diet.
 
-**Is `diet stats` accurate?**
-The rtk numbers and token counts are exact — they're read from source of
-truth. The cost and cache-savings estimates use current Anthropic public
-pricing; if you're on a different plan, override with `DIET_PRICE_INPUT`,
-`DIET_PRICE_OUTPUT`, `DIET_PRICE_CACHE_READ`, `DIET_PRICE_CACHE_WRITE` env
-vars.
+**Can I uninstall cleanly?**
+Yes. `diet undo` removes everything diet added. Run `brew uninstall rtk` if you also want the underlying compression tool gone.
 
 ---
 
-## Credits
+MIT license. Built by [@xotw](https://github.com/xotw). Issues, PRs, feedback welcome.
 
-- [rtk](https://github.com/rtk-ai/rtk) does the hard part (shell output
-  compression). Diet is a thin layer that makes it accessible and adds the
-  other layers.
-- Anthropic's prompt caching is the silent hero of long Claude Code sessions.
-
-MIT license.
+Credit: the compression engine is [rtk](https://github.com/rtk-ai/rtk). diet stacks behavioral rules, auditing, and honest accounting on top of it.
